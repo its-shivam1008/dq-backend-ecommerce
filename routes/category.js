@@ -31,19 +31,27 @@ router.post(
         return res.status(400).json({ message: 'categoryName and categoryImage are required' });
       }
 
-      // Upload to Cloudinary
-      let uploaded;
-      try {
-        uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-          folder: 'act-resto/categories',
-          resource_type: 'image',
-        });
-      } catch (err) {
-        console.error('Cloudinary upload failed:', err);
-        return res.status(500).json({ message: 'Image upload failed' });
+      // Upload to Cloudinary, with base64 fallback if not configured or fails
+      let categoryImage;
+      const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+      if (hasCloudinary) {
+        try {
+          const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+            folder: 'act-resto/categories',
+            resource_type: 'image',
+          });
+          categoryImage = uploaded.secure_url || uploaded.url;
+        } catch (err) {
+          console.error('Cloudinary upload failed, falling back to base64:', err);
+          const base64 = req.file.buffer.toString('base64');
+          const mime = req.file.mimetype || 'image/jpeg';
+          categoryImage = `data:${mime};base64,${base64}`;
+        }
+      } else {
+        const base64 = req.file.buffer.toString('base64');
+        const mime = req.file.mimetype || 'image/jpeg';
+        categoryImage = `data:${mime};base64,${base64}`;
       }
-
-      const categoryImage = uploaded.secure_url || uploaded.url;
 
       const newCategory = new Category({
         categoryName,
@@ -94,15 +102,24 @@ router.post('/category/update/:id', upload.single('categoryImage'), async (req, 
     if (categoryName) updateData.categoryName = categoryName;
     if (restaurantId) updateData.restaurantId = restaurantId;
     if (req.file && req.file.buffer) {
-      try {
-        const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-          folder: 'act-resto/categories',
-          resource_type: 'image',
-        });
-        updateData.categoryImage = uploaded.secure_url || uploaded.url;
-      } catch (err) {
-        console.error('Cloudinary upload failed:', err);
-        return res.status(500).json({ message: 'Image upload failed' });
+      const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+      if (hasCloudinary) {
+        try {
+          const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+            folder: 'act-resto/categories',
+            resource_type: 'image',
+          });
+          updateData.categoryImage = uploaded.secure_url || uploaded.url;
+        } catch (err) {
+          console.error('Cloudinary upload failed, falling back to base64:', err);
+          const base64 = req.file.buffer.toString('base64');
+          const mime = req.file.mimetype || 'image/jpeg';
+          updateData.categoryImage = `data:${mime};base64,${base64}`;
+        }
+      } else {
+        const base64 = req.file.buffer.toString('base64');
+        const mime = req.file.mimetype || 'image/jpeg';
+        updateData.categoryImage = `data:${mime};base64,${base64}`;
       }
     }
 

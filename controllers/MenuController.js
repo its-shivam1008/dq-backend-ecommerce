@@ -110,19 +110,29 @@ exports.createMenuItem = async (req, res) => {
     const processedStockItems = processStockItems(req.body.stockItems);
     console.log("Processed stock items:", processedStockItems);
 
-  // Handle image
+  // Handle image with graceful fallback
   let itemImage = null;
   if (req.file && req.file.buffer) {
-    try {
-      const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
-        folder: "act-resto/menu-items",
-        resource_type: "image",
-      });
-      itemImage = uploadResult.secure_url || uploadResult.url || null;
-    } catch (uploadErr) {
-      console.error("Cloudinary upload failed:", uploadErr);
-      // Continue without image rather than failing the whole request
-      itemImage = null;
+    const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+    if (hasCloudinary) {
+      try {
+        const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+          folder: "act-resto/menu-items",
+          resource_type: "image",
+        });
+        itemImage = uploadResult.secure_url || uploadResult.url || null;
+      } catch (uploadErr) {
+        console.error("Cloudinary upload failed, falling back to base64:", uploadErr);
+        // Fallback: embed as base64 data URL in MongoDB
+        const base64 = req.file.buffer.toString('base64');
+        const mime = req.file.mimetype || 'image/jpeg';
+        itemImage = `data:${mime};base64,${base64}`;
+      }
+    } else {
+      // No cloudinary config: store as base64 data URL
+      const base64 = req.file.buffer.toString('base64');
+      const mime = req.file.mimetype || 'image/jpeg';
+      itemImage = `data:${mime};base64,${base64}`;
     }
   }
 
