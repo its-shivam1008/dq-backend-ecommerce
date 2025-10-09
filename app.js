@@ -57,12 +57,25 @@ function createApp() {
   app.use(express.urlencoded({ extended: true }));
   app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-  // DB connection
-  DBConnect(process.env.MONGO_URL);
+  // DB connection - only connect if MONGO_URL is provided
+  if (process.env.MONGO_URL) {
+    DBConnect(process.env.MONGO_URL);
+  } else {
+    console.log("⚠️ MONGO_URL not provided - running without database connection");
+  }
 
-  // Default route - serve the landing page
+  // Default route - serve a simple welcome message
   app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
+    res.json({
+      message: "🍽️ DQ Backend Ecommerce API is Running Successfully!",
+      status: "OK",
+      version: "1.0.0",
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        health: "/health",
+        api: "All your existing API routes are available"
+      }
+    });
   });
 
   // Health check endpoint
@@ -94,6 +107,15 @@ function createApp() {
   app.use(banner);
   app.use(report);
   app.use(coupen);
+
+  // Error handling middleware (must be last)
+  app.use((err, req, res, next) => {
+    console.error("Unhandled error:", err);
+    res.status(500).json({
+      error: "Internal server error",
+      message: "Something went wrong"
+    });
+  });
 
   return app;
 }
