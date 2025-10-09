@@ -6,22 +6,13 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { uploadBufferToCloudinary } = require('../utils/cloudinary');
 
 
 
 // ---------- Multer setup ----------
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = './uploads/categories';
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
-});
-
-const upload = multer({ storage });
+// Use memory storage to avoid filesystem writes on serverless platforms
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ---------- CREATE CATEGORY ----------
 router.post(
@@ -40,7 +31,19 @@ router.post(
         return res.status(400).json({ message: 'categoryName and categoryImage are required' });
       }
 
-      const categoryImage = `/uploads/categories/${req.file.filename}`;
+      // Upload to Cloudinary
+      let uploaded;
+      try {
+        uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+          folder: 'act-resto/categories',
+          resource_type: 'image',
+        });
+      } catch (err) {
+        console.error('Cloudinary upload failed:', err);
+        return res.status(500).json({ message: 'Image upload failed' });
+      }
+
+      const categoryImage = uploaded.secure_url || uploaded.url;
 
       const newCategory = new Category({
         categoryName,
@@ -90,7 +93,18 @@ router.post('/category/update/:id', upload.single('categoryImage'), async (req, 
     const updateData = {};
     if (categoryName) updateData.categoryName = categoryName;
     if (restaurantId) updateData.restaurantId = restaurantId;
-    if (req.file) updateData.categoryImage = req.file.path;
+    if (req.file && req.file.buffer) {
+      try {
+        const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+          folder: 'act-resto/categories',
+          resource_type: 'image',
+        });
+        updateData.categoryImage = uploaded.secure_url || uploaded.url;
+      } catch (err) {
+        console.error('Cloudinary upload failed:', err);
+        return res.status(500).json({ message: 'Image upload failed' });
+      }
+    }
 
     const updatedCategory = await Category.findByIdAndUpdate(req.params.id, updateData, { new: true });
     res.json(updatedCategory);
