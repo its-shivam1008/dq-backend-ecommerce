@@ -60,9 +60,20 @@ function createApp() {
   // DB connection
   DBConnect(process.env.MONGO_URL);
 
-  // Default route
+  // Default route - serve the landing page
   app.get("/", (req, res) => {
-    res.send("Hello World");
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  });
+
+  // Health check endpoint
+  app.get("/health", (req, res) => {
+    res.json({
+      status: "OK",
+      message: "DQ Backend Ecommerce API is running successfully",
+      timestamp: new Date().toISOString(),
+      version: "1.0.0",
+      environment: process.env.NODE_ENV || "development"
+    });
   });
 
   // Routes
