@@ -38,7 +38,7 @@ function createApp() {
       timestamp: new Date().toISOString(),
       endpoints: {
         health: "/health",
-        authentication: "/api/auth",
+        authentication: "/signin, /signup (or /api/auth/*)",
         categories: "/api/categories",
         menu: "/api/menu",
         orders: "/api/orders",
@@ -53,7 +53,7 @@ function createApp() {
         reports: "/api/reports",
         coupons: "/api/coupons"
       },
-      note: "All API routes are prefixed with /api/ for better organization"
+      note: "Both old routes (like /signin) and new API routes (like /api/auth/*) are supported for backward compatibility"
     });
   });
 
@@ -68,17 +68,23 @@ function createApp() {
     });
   });
 
-  // Add routes individually to avoid conflicts
+  // Add auth routes first (most important for login)
   try {
     const authRouter = require("./routes/auth.js");
+    console.log("✅ Auth routes loaded successfully");
+    // Add backward-compatible routes for frontend (this will handle /signin)
+    app.use("/", authRouter);
+    // Add API-prefixed routes
     app.use("/api/auth", authRouter);
   } catch (error) {
-    console.log("Auth routes not loaded:", error.message);
+    console.log("❌ Auth routes not loaded:", error.message);
   }
 
   try {
     const category = require('./routes/category.js');
     app.use("/api/categories", category);
+    // Add backward-compatible routes
+    app.use("/", category);
   } catch (error) {
     console.log("Category routes not loaded:", error.message);
   }
@@ -86,6 +92,8 @@ function createApp() {
   try {
     const menu = require('./routes/menu.js');
     app.use("/api/menu", menu);
+    // Add backward-compatible routes
+    app.use("/", menu);
   } catch (error) {
     console.log("Menu routes not loaded:", error.message);
   }
@@ -93,8 +101,39 @@ function createApp() {
   try {
     const order = require('./routes/orderRoute.js');
     app.use("/api/orders", order);
+    // Add backward-compatible routes
+    app.use("/", order);
   } catch (error) {
     console.log("Order routes not loaded:", error.message);
+  }
+
+  // Add other essential routes for backward compatibility
+  try {
+    const customer = require('./routes/CustomerRoute.js');
+    app.use("/", customer);
+  } catch (error) {
+    console.log("Customer routes not loaded:", error.message);
+  }
+
+  try {
+    const supplier = require('./routes/supplierRoute.js');
+    app.use("/", supplier);
+  } catch (error) {
+    console.log("Supplier routes not loaded:", error.message);
+  }
+
+  try {
+    const inventory = require('./routes/inventoryRoute.js');
+    app.use("/", inventory);
+  } catch (error) {
+    console.log("Inventory routes not loaded:", error.message);
+  }
+
+  try {
+    const reservation = require('./routes/reservationRoute.js');
+    app.use("/", reservation);
+  } catch (error) {
+    console.log("Reservation routes not loaded:", error.message);
   }
 
   // Error handling middleware (must be last)
