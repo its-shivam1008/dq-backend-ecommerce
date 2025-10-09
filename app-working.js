@@ -82,8 +82,9 @@ function createApp() {
 
   try {
     const category = require('./routes/category.js');
-    app.use("/api/categories", category);
-    // Add backward-compatible routes
+    // Mount under /api to produce /api/categories, /api/category/:id, etc.
+    app.use("/api", category);
+    // Backward-compatible routes (e.g., /categories)
     app.use("/", category);
   } catch (error) {
     console.log("Category routes not loaded:", error.message);
@@ -91,8 +92,9 @@ function createApp() {
 
   try {
     const menu = require('./routes/menu.js');
-    app.use("/api/menu", menu);
-    // Add backward-compatible routes
+    // Mount under /api to produce /api/menu/add, /api/menu/allmenues, etc.
+    app.use("/api", menu);
+    // Backward-compatible routes (e.g., /menu/add)
     app.use("/", menu);
   } catch (error) {
     console.log("Menu routes not loaded:", error.message);
@@ -100,8 +102,9 @@ function createApp() {
 
   try {
     const order = require('./routes/orderRoute.js');
-    app.use("/api/orders", order);
-    // Add backward-compatible routes
+    // Mount under /api to produce /api/create/order, etc.
+    app.use("/api", order);
+    // Backward-compatible routes
     app.use("/", order);
   } catch (error) {
     console.log("Order routes not loaded:", error.message);
