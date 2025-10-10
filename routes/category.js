@@ -75,7 +75,24 @@ router.post(
 
 router.get('/categories', async (req, res) => {
   try {
-    const categories = await Category.find({ isDeleted: false });
+    const mongoose = require('mongoose');
+    const envRestaurantId = process.env.RESTAURENT_ID;
+
+    let filter = { isDeleted: false };
+    if (envRestaurantId) {
+      // Category.restaurantId is an ObjectId reference to User
+      if (mongoose.Types.ObjectId.isValid(envRestaurantId)) {
+        filter.restaurantId = new mongoose.Types.ObjectId(envRestaurantId);
+      } else {
+        // Fallback: also try string compare in case data was saved inconsistently
+        filter.$or = [
+          { restaurantId: envRestaurantId },
+          { restaurantId: { $exists: false } } // keep legacy records without restaurant set out of the way
+        ];
+      }
+    }
+
+    const categories = await Category.find(filter);
     res.json({ data: categories });
   } catch (err) {
     console.error(err);

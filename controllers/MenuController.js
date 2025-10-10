@@ -194,7 +194,8 @@ exports.uploadMiddleware = upload.single("itemImage");
 // ---------------- GET ALL MENU ITEMS ----------------
 exports.getMenuItems = async (req, res) => {
   try {
-    const { restaurantId } = req.query;
+    // Prefer explicit query param, else fall back to env var
+    const restaurantId = req.query.restaurantId || process.env.RESTAURENT_ID;
 
     // Build query filter
     let filter = {};
