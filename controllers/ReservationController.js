@@ -193,30 +193,22 @@ exports.getAvailableTimeSlots = async (req, res) => {
     const now = new Date();
     const isToday = date === now.toISOString().split('T')[0];
     
-    const availableSlots = allTimeSlots.filter(slot => {
-      // If it's today, filter out past time slots
-      if (isToday) {
-        const [hours, minutes] = slot.split(':').map(Number);
-        const slotTime = new Date();
-        slotTime.setHours(hours, minutes, 0, 0);
-        
-        if (slotTime <= now) {
-          return false; // Past time slot
-        }
-      }
-      
-      // Check if slot is booked
-      return !bookedSlots.has(slot);
-    });
-
-    // Get table information for each available slot
-    const slotsWithTables = availableSlots.map(slot => {
+    // Process ALL time slots (not just available ones) to show booking status
+    const allSlotsWithStatus = allTimeSlots.map(slot => {
       const [hours, minutes] = slot.split(':').map(Number);
       const slotStart = new Date(date);
       slotStart.setHours(hours, minutes, 0, 0);
       
       const slotEnd = new Date(slotStart);
       slotEnd.setMinutes(slotEnd.getMinutes() + 30);
+
+      // Check if this is a past time slot for today
+      let isPastSlot = false;
+      if (isToday) {
+        const slotTime = new Date();
+        slotTime.setHours(hours, minutes, 0, 0);
+        isPastSlot = slotTime <= now;
+      }
 
       // Find reservations that overlap with this time slot
       const overlappingReservations = existingReservations.filter(reservation => {
@@ -233,18 +225,26 @@ exports.getAvailableTimeSlots = async (req, res) => {
       const allTables = Array.from({length: 20}, (_, i) => `T${i + 1}`);
       const availableTables = allTables.filter(table => !bookedTables.includes(table));
 
+      // Determine if slot is available (has free tables and not in the past)
+      const isAvailable = availableTables.length > 0 && !isPastSlot;
+
       return {
         time: slot,
-        available: true,
+        available: isAvailable,
         availableTables: availableTables,
-        bookedTables: bookedTables
+        bookedTables: bookedTables,
+        isPast: isPastSlot,
+        totalTables: allTables.length
       };
     });
+    
+    // Count available slots (for backwards compatibility)
+    const availableSlots = allSlotsWithStatus.filter(slot => slot.available);
 
     res.json({
       date,
       restaurantId,
-      timeSlots: slotsWithTables,
+      timeSlots: allSlotsWithStatus, // Return ALL slots with their status
       totalSlots: allTimeSlots.length,
       availableSlots: availableSlots.length,
       bookedSlots: bookedSlots.size
