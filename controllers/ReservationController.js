@@ -65,6 +65,7 @@ exports.getAllReservations = async (req, res) => {
         customerPhone: reservation.customerId?.phoneNumber || null,
         date,
         time,
+        tableNumber: reservation.tableNumber, // CRITICAL: Include table number for frontend
         guests: 2,
         specialRequests: reservation.notes || '',
         orderItems: [],
