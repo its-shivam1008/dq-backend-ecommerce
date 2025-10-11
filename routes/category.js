@@ -76,26 +76,40 @@ router.post(
 router.get('/categories', async (req, res) => {
   try {
     const mongoose = require('mongoose');
+    // Get restaurantId from query parameter first, then fallback to env
+    const queryRestaurantId = req.query.restaurantId;
     const envRestaurantId = process.env.RESTAURENT_ID;
+    const targetRestaurantId = queryRestaurantId || envRestaurantId;
+
+    // First, let's check all categories to debug
+    const allCategories = await Category.find({ isDeleted: false });
+    console.log('All categories in database:', allCategories.length);
+    console.log('Sample category:', allCategories[0]);
 
     let filter = { isDeleted: false };
-    if (envRestaurantId) {
-      // Category.restaurantId is an ObjectId reference to User
-      if (mongoose.Types.ObjectId.isValid(envRestaurantId)) {
-        filter.restaurantId = new mongoose.Types.ObjectId(envRestaurantId);
+    if (targetRestaurantId) {
+      // Try multiple approaches to match the restaurantId
+      const orConditions = [
+        { restaurantId: targetRestaurantId },
+        { restaurantId: new mongoose.Types.ObjectId(targetRestaurantId) }
+      ];
+      
+      // Also check if restaurantId field exists at all
+      if (allCategories.length > 0 && !allCategories[0].restaurantId) {
+        console.log('Categories exist but no restaurantId field found');
+        // If no restaurantId field exists, return all categories
+        filter = { isDeleted: false };
       } else {
-        // Fallback: also try string compare in case data was saved inconsistently
-        filter.$or = [
-          { restaurantId: envRestaurantId },
-          { restaurantId: { $exists: false } } // keep legacy records without restaurant set out of the way
-        ];
+        filter.$or = orConditions;
       }
     }
 
+    console.log('Categories filter:', filter);
     const categories = await Category.find(filter);
+    console.log('Found categories:', categories.length);
     res.json({ data: categories });
   } catch (err) {
-    console.error(err);
+    console.error('Categories API error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
