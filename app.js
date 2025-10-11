@@ -91,12 +91,17 @@ function createApp() {
 
   // Routes
   app.use("/", authRouter);
+  
+  // IMPORTANT: Reservation routes must come BEFORE inventory routes
+  // to prevent /:id route conflict with /available-slots
+  app.use(reservation);
+  
+  // Other routes
   app.use(category);
   app.use(customer);
   app.use(supplier);
   app.use(subcategory);
-  app.use(reservation);
-  app.use(inventory);
+  app.use(inventory); // This has /:id route that catches everything
   app.use(menu);
   app.use(qr);
   app.use(due);
