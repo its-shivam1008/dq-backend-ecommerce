@@ -46,11 +46,15 @@ exports.getAllReservations = async (req, res) => {
     // Frontend expects: { reservations: [{ id, customerName, customerEmail, customerPhone, date, time, guests, specialRequests, orderItems, totalAmount, paymentMethod, status, createdAt, updatedAt }] }
     const transformedReservations = reservations.map((reservation) => {
       const start = new Date(reservation.startTime);
-      const yyyy = String(start.getFullYear());
-      const mm = String(start.getMonth() + 1).padStart(2, '0');
-      const dd = String(start.getDate()).padStart(2, '0');
-      const hh = String(start.getHours()).padStart(2, '0');
-      const mi = String(start.getMinutes()).padStart(2, '0');
+      // TIMEZONE FIX: Convert UTC back to IST (add 5.5 hours) to show original booking time
+      const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds  
+      const localTime = new Date(start.getTime() + IST_OFFSET_MS);
+      
+      const yyyy = String(localTime.getUTCFullYear());
+      const mm = String(localTime.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(localTime.getUTCDate()).padStart(2, '0');
+      const hh = String(localTime.getUTCHours()).padStart(2, '0');
+      const mi = String(localTime.getUTCMinutes()).padStart(2, '0');
 
       const date = `${yyyy}-${mm}-${dd}`;
       const time = `${hh}:${mi}`;
