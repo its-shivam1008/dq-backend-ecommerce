@@ -47,16 +47,23 @@ function getApp() {
 
 module.exports = async (req, res) => {
   try {
+    // Log incoming request for debugging
+    console.log(`[api/index] ${req.method} ${req.url}`);
+    
     const appInstance = getApp();
     return appInstance(req, res);
   } catch (err) {
     console.error("[api/index] Initialization error:", err);
+    console.error("[api/index] Stack trace:", err?.stack);
+    
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
         error: "FUNCTION_INIT_FAILED",
         message: err?.message || "Internal error",
+        path: req.url,
+        method: req.method
       })
     );
   }
