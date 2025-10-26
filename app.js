@@ -20,6 +20,7 @@ const order = require('./routes/orderRoute.js')
 const path = require("path");
 const report = require('./routes/reportRoute.js')
 const coupen = require('./routes/CoupenRoute.js')
+const customLayout = require('./routes/customLayout.js')
 // require('./cron/reportCron');
 
 dotenv.config();
@@ -30,6 +31,7 @@ function createApp() {
   // CORS configuration
   const allowedOrigins = [
     'https://act-ecommerce-restaurent.vercel.app',
+    'https://act-resto-backend.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000',
     process.env.FRONTEND_ORIGIN,
@@ -39,7 +41,10 @@ function createApp() {
     origin: (origin, callback) => {
       // Allow requests with no origin (like curl or server-to-server)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Allow all Vercel preview deployments and configured origins
+      if (origin && (origin.includes('.vercel.app') || allowedOrigins.includes(origin))) {
+        return callback(null, true);
+      }
       return callback(new Error('Not allowed by CORS'));
     },
     methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
@@ -112,6 +117,7 @@ function createApp() {
   app.use(banner);
   app.use(report);
   app.use(coupen);
+  app.use(customLayout);
 
   // Error handling middleware (must be last)
   app.use((err, req, res, next) => {
