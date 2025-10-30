@@ -12,12 +12,56 @@ exports.createReservation = async (req, res) => {
       payment,
       notes,} = req.body;
 
+    // Validate required fields
+    if (!restaurantId || !startTime || !endTime) {
+      return res.status(400).json({ message: "Missing required fields: restaurantId, startTime, endTime" });
+    }
+
+    // Prevent booking in the past
+    const now = new Date();
+    const bookingStartTime = new Date(startTime);
+    const bookingEndTime = new Date(endTime);
+
+    if (bookingStartTime < now) {
+      return res.status(400).json({ 
+        message: "Cannot create reservation in the past. Please select a future date and time." 
+      });
+    }
+
+    if (bookingEndTime <= bookingStartTime) {
+      return res.status(400).json({ 
+        message: "End time must be after start time." 
+      });
+    }
+
+    // Check for existing reservation at the same time and table
+    if (tableNumber) {
+      const existingReservation = await Reservation.findOne({
+        restaurantId,
+        tableNumber,
+        $or: [
+          // New booking starts during an existing reservation
+          { startTime: { $lte: bookingStartTime }, endTime: { $gt: bookingStartTime } },
+          // New booking ends during an existing reservation
+          { startTime: { $lt: bookingEndTime }, endTime: { $gte: bookingEndTime } },
+          // New booking completely contains an existing reservation
+          { startTime: { $gte: bookingStartTime }, endTime: { $lte: bookingEndTime } }
+        ]
+      });
+
+      if (existingReservation) {
+        return res.status(409).json({ 
+          message: `Table ${tableNumber} is already booked for this time slot. Please select a different table or time.` 
+        });
+      }
+    }
+
     const reservation = new Reservation({
       restaurantId,
       customerId,
       customerName,
-      startTime,
-      endTime,
+      startTime: bookingStartTime,
+      endTime: bookingEndTime,
       tableNumber,
       advance,
       payment,
@@ -25,9 +69,10 @@ exports.createReservation = async (req, res) => {
     });
 
     await reservation.save();
+    console.log('✅ Reservation saved to database:', reservation._id);
     res.status(201).json({ message: "Reservation created successfully", reservation });
   } catch (err) {
-    console.log("Error" , err)
+    console.error("❌ Error creating reservation:", err)
     res.status(500).json({ message: "Error creating reservation", error: err.message });
   }
 };
