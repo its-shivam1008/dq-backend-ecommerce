@@ -91,6 +91,43 @@ router.post("/custom-layout/:restaurantId", optionalAuthMiddleware, async (req, 
   }
 });
 
+// Delete custom layout (reset to default)
+router.delete("/custom-layout/:restaurantId", async (req, res) => {
+  try {
+    const { restaurantId } = req.params;
+    console.log('🗑️ Deleting custom layout for restaurant:', restaurantId);
+    
+    const restaurant = await RestaurantProfile.findOneAndUpdate(
+      { restaurantID: restaurantId },
+      { 
+        $unset: { customLayout: "" },
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+    
+    if (!restaurant) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Restaurant not found" 
+      });
+    }
+    
+    console.log('✅ Custom layout deleted successfully');
+    res.json({ 
+      success: true,
+      message: "Layout reset successfully" 
+    });
+  } catch (err) {
+    console.error('❌ Error deleting custom layout:', err);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error",
+      error: err.message 
+    });
+  }
+});
+
 // Verify restaurant admin access
 router.get("/admin/verify/:restaurantId", async (req, res) => {
   try {
