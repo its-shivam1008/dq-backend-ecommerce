@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const mongoose = require('mongoose')
 const cors = require("cors");
 const dotenv = require("dotenv");
@@ -49,6 +49,7 @@ const PORT = process.env.PORT || 4000;
 // Middleware
 const allowedOrigins = [
   'https://dq-rms.vercel.app',
+  'https://act-ecommerce-restaurent.vercel.app',
   'http://localhost:3000'
 ];
 
@@ -66,8 +67,11 @@ const corsOptions = {
 // In non-production, allow all origins to prevent crashes during local/dev usage
 if (process.env.NODE_ENV === 'production') {
   app.use(cors(corsOptions));
+  // Explicitly handle preflight in production
+  app.options('*', cors(corsOptions));
 } else {
   app.use(cors({ origin: true, credentials: true }));
+  app.options('*', cors({ origin: true, credentials: true }));
 }
 
 app.use(express.json());
