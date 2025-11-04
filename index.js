@@ -68,10 +68,10 @@ const corsOptions = {
 if (process.env.NODE_ENV === 'production') {
   app.use(cors(corsOptions));
   // Explicitly handle preflight in production
-  app.options('*', cors(corsOptions));
+  app.options('/(.*)', cors(corsOptions));
 } else {
   app.use(cors({ origin: true, credentials: true }));
-  app.options('*', cors({ origin: true, credentials: true }));
+  app.options('/(.*)', cors({ origin: true, credentials: true }));
 }
 
 app.use(express.json());
