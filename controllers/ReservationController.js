@@ -1,9 +1,29 @@
 ﻿const Reservation = require("../model/Reservation");
+const Table = require("../model/Table");
 
-// 📌 Create Reservation
+async function listAllTables(restaurantId) {
+  // Try DB tables; fallback to T1..T20 if none exist
+  try {
+    const rows = await Table.find({ restaurantId }).select("tableNumber").lean();
+    if (rows?.length) return rows.map(r => r.tableNumber);
+  } catch (_) {}
+  return Array.from({ length: 20 }, (_, i) => `T${i + 1}`);
+}
+
+async function computeBookedTables(restaurantId, start, end) {
+  const overlaps = await Reservation.find({
+    restaurantId,
+    startTime: { $lt: end },
+    endTime: { $gt: start },
+  }).select("tableNumber").lean();
+  return new Set((overlaps || []).map(r => r.tableNumber).filter(Boolean));
+}
+
+// 📌 Create Reservation (auto-assign or validate table)
 exports.createReservation = async (req, res) => {
   try {
-    const { restaurantId,
+    const {
+      restaurantId,
       customerId,
       startTime,
       endTime,
@@ -11,24 +31,78 @@ exports.createReservation = async (req, res) => {
       tableNumber,
       advance,
       payment,
-      notes, } = req.body;
+      notes,
+    } = req.body;
+
+    if (!restaurantId) return res.status(400).json({ message: "restaurantId is required" });
+    if (!startTime || !endTime) return res.status(400).json({ message: "startTime and endTime are required" });
+
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: "Invalid startTime or endTime" });
+    }\r
+    if (start >= end) {
+      return res.status(400).json({ message: "endTime must be after startTime" });
+    }
+
+    // Get full table list and current bookings for the time window
+    const allTables = await listAllTables(restaurantId);
+    const booked = await computeBookedTables(restaurantId, start, end);
+    const available = allTables.filter(t => !booked.has(t));
+
+    // Determine which table to use
+    let selectedTable = tableNumber;
+    if (!selectedTable || !selectedTable.trim()) {
+      // Auto-assign first available table
+      selectedTable = available[0];
+      if (!selectedTable) {
+        return res.status(409).json({
+          success: false,
+          message: "No tables available for the selected time window",
+          bookedTables: Array.from(booked),
+        });
+      }
+    } else {
+      // Validate requested table is available
+      if (!allTables.includes(selectedTable)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid tableNumber '${selectedTable}'`,
+          availableTables: available,
+        });
+      }
+      if (booked.has(selectedTable)) {
+        return res.status(409).json({
+          success: false,
+          message: `Table ${selectedTable} is already booked in this time window`,
+          availableTables: available,
+          bookedTables: Array.from(booked),
+        });
+      }
+    }
 
     const reservation = new Reservation({
       restaurantId,
       customerId,
       customerName,
-      startTime,
-      endTime,
-      tableNumber,
+      startTime: start,
+      endTime: end,
+      tableNumber: selectedTable,
       advance,
       payment,
       notes,
     });
 
     await reservation.save();
-    res.status(201).json({ message: "Reservation created successfully", reservation });
+    return res.status(201).json({
+      success: true,
+      message: "Reservation created successfully",
+      reservation,
+      assignedTable: selectedTable,
+    });
   } catch (err) {
-    console.log("Error", err)
+    console.log("Error", err);
     res.status(500).json({ message: "Error creating reservation", error: err.message });
   }
 };
