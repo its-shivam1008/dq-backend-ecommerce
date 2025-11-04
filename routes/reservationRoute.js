@@ -5,6 +5,40 @@ const {authMiddleware, optionalAuthMiddleware} = require("../middleware/authMidd
 const Reservation = require("../model/Reservation");
 const Table = require("../model/Table");
 
+// --- Timezone helpers (Asia/Kolkata, UTC+5:30) ---
+const IST_OFFSET_MIN = 330; // minutes
+const MS_PER_MIN = 60 * 1000;
+
+function parseYMD(str) {
+  // Expect YYYY-MM-DD; fallback to today's IST date if missing/invalid
+  if (!str || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return null;
+  const [y, m, d] = str.split('-').map(Number);
+  return { y, m, d };
+}
+
+function utcMsForIstStartOfDay({ y, m, d }) {
+  // 00:00 IST equals previous day 18:30 UTC
+  return Date.UTC(y, m - 1, d) - IST_OFFSET_MIN * MS_PER_MIN;
+}
+
+function utcMsForIst({ y, m, d }, hh, mm) {
+  // Convert an IST wall time (hh:mm) to UTC ms for the same calendar date in IST
+  const totalMin = hh * 60 + mm;
+  const utcTotalMin = totalMin - IST_OFFSET_MIN;
+  const baseUtc = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  return baseUtc + utcTotalMin * MS_PER_MIN;
+}
+
+function nowIstMs() {
+  return Date.now() + IST_OFFSET_MIN * MS_PER_MIN;
+}
+
+function formatHHMM(hh, mm) {
+  const h = String(hh).padStart(2, '0');
+  const m = String(mm).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
 // Public: Get available slots for a date (fallback to default tables if none in DB)
 router.get('/available-slots', async (req, res) => {
   try {
@@ -12,26 +46,28 @@ router.get('/available-slots', async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ message: 'restaurantId is required' });
     }
-    const targetDate = date ? new Date(date) : new Date();
-    if (isNaN(targetDate.getTime())) {
-      return res.status(400).json({ message: 'Invalid date' });
-    }
 
-    // Normalize to start of day in local time
-    const dayStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0);
-    const dayEnd = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999);
+    // Determine target day in IST
+    const todayIst = new Date(nowIstMs());
+    const todayParts = { y: todayIst.getUTCFullYear(), m: todayIst.getUTCMonth() + 1, d: todayIst.getUTCDate() };
+    const parts = parseYMD(date) || todayParts;
 
-    // Fetch reservations for the day
+    // Compute IST day window in UTC for DB query
+    const dayStartUTCms = utcMsForIstStartOfDay(parts);
+    const dayEndUTCms = utcMsForIstStartOfDay({ y: parts.y, m: parts.m, d: parts.d + 1 }) - 1;
+    const dayStartUTC = new Date(dayStartUTCms);
+    const dayEndUTC = new Date(dayEndUTCms);
+
+    // Fetch reservations overlapping the day in UTC (which corresponds to IST day)
     const reservations = await Reservation.find({
       restaurantId,
-      startTime: { $lte: dayEnd },
-      endTime: { $gte: dayStart }
+      startTime: { $lte: dayEndUTC },
+      endTime: { $gte: dayStartUTC }
     }).lean();
 
     // Determine table catalog (from DB or fallback)
     let allTables = [];
     try {
-      // restaurantId type may vary; attempt both string and ObjectId queries
       const byString = await Table.find({ restaurantId }).select('tableNumber').lean();
       if (byString && byString.length) {
         allTables = byString.map(t => t.tableNumber);
@@ -42,26 +78,35 @@ router.get('/available-slots', async (req, res) => {
       allTables = Array.from({ length: 20 }, (_, i) => `T${i + 1}`);
     }
 
-    // Generate 30-min slots from 18:00 to 21:00 (7 slots)
-    const slotTimes = ["18:00","18:30","19:00","19:30","20:00","20:30","21:00"];
+    // Generate 30-min slots from 10:00 to 22:00 IST
+    const slots = [];
+    const startHour = 10; // 10 AM IST
+    const endHour = 22;   // 10 PM IST (exclusive of 22:30)
+    for (let hh = startHour; hh <= endHour; hh++) {
+      for (const mm of [0, 30]) {
+        if (hh === endHour && mm === 30) continue; // end at 22:00
+        const slotLabel = formatHHMM(hh, mm); // IST label
+        const slotStartUTC = new Date(utcMsForIst(parts, hh, mm));
+        const slotEndUTC = new Date(slotStartUTC.getTime() + 30 * 60 * 1000);
 
-    const now = new Date();
-    const slots = slotTimes.map(t => {
-      const [hh, mm] = t.split(':').map(Number);
-      const slotStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), hh, mm, 0, 0);
-      const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
-      // Overlap if reservation intersects slot window
-      const overlapping = reservations.filter(r => new Date(r.startTime) < slotEnd && new Date(r.endTime) > slotStart);
-      const booked = new Set(overlapping.map(r => r.tableNumber).filter(Boolean));
-      const available = allTables.filter(tn => !booked.has(tn));
-      return {
-        time: t,
-        isPast: slotEnd <= now,
-        available: available.length > 0,
-        availableTables: available,
-        bookedTables: Array.from(booked)
-      };
-    });
+        // Overlap if reservation intersects slot window
+        const overlapping = reservations.filter(r => new Date(r.startTime) < slotEndUTC && new Date(r.endTime) > slotStartUTC);
+        const booked = new Set(overlapping.map(r => r.tableNumber).filter(Boolean));
+        const available = allTables.filter(tn => !booked.has(tn));
+
+        // Determine "past" relative to IST clock
+        const slotEndIstMs = slotEndUTC.getTime() + IST_OFFSET_MIN * MS_PER_MIN;
+        const past = slotEndIstMs <= nowIstMs();
+
+        slots.push({
+          time: slotLabel,
+          isPast: past,
+          available: available.length > 0,
+          availableTables: available,
+          bookedTables: Array.from(booked)
+        });
+      }
+    }
 
     const totalSlots = slots.length;
     const availableSlots = slots.filter(s => s.available).length;
@@ -69,7 +114,7 @@ router.get('/available-slots', async (req, res) => {
 
     return res.json({ 
       success: true, 
-      date: dayStart.toISOString().slice(0,10), 
+      date: `${parts.y}-${String(parts.m).padStart(2,'0')}-${String(parts.d).padStart(2,'0')}`, 
       totalSlots,
       availableSlots,
       bookedSlots,
