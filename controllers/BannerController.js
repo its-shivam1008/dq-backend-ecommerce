@@ -1,86 +1,31 @@
-const Banner = require("../model/Banner");
-const multer = require("multer");
-const path = require("path");
+﻿const Banner = require("../model/Banner");
+const multer = require('multer')
+const cloudinary = require("../config/cloudinary"); // adjust path
 const fs = require("fs");
+const storage = multer.memoryStorage();
+const streamifier = require("streamifier");
+const getImageUrl = require('../utils/getImageUrl')
 
-// Ensure uploads directory exists
-const uploadsDir = "uploads/banners";
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// ⚡ Configure multer inside controller
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir); // folder where files are stored
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname.replace(/\s+/g, "_"));
-  },
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (mimetype && extname) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed"), false);
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
-}).fields([
+const upload = multer({ storage }).fields([
   { name: "banner_1", maxCount: 1 },
   { name: "banner_2", maxCount: 1 },
   { name: "banner_3", maxCount: 1 },
 ]);
 
-// Helper function to get full image URL
-const getImageUrl = (imagePath) => {
-  if (!imagePath) return null;
-  const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-  return `${baseUrl}/${imagePath.replace(/\\/g, '/')}`;
-};
 
-// ✅ Get all banners (No Auth)
-exports.getBanners = async (req, res) => {
-  try {
-    console.log('Get banners request received');
-    
-    const restaurantIdParam = req.query.restaurantId;
-    const restaurantId = restaurantIdParam || process.env.RESTAURENT_ID;
-    
-    let banners;
-    if (restaurantId) {
-      banners = await Banner.find({ restaurantId });
-      console.log(`Found ${banners.length} banners for restaurant ${restaurantId}`);
-    } else {
-      banners = await Banner.find({});
-      console.log(`Found ${banners.length} total banners (no restaurant filter applied)`);
-    }
-    
-    // Convert file paths to full URLs
-    const bannersWithUrls = banners.map(banner => ({
-      ...banner.toObject(),
-      banner_1: getImageUrl(banner.banner_1),
-      banner_2: getImageUrl(banner.banner_2),
-      banner_3: getImageUrl(banner.banner_3),
-    }));
+const uploadToCloudinary = (fileBuffer, folder) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+    streamifier.createReadStream(fileBuffer).pipe(stream);
+  });
 
-    res.status(200).json({ success: true, data: bannersWithUrls });
-  } catch (error) {
-    console.error("Get banners error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
 
-// ✅ Create Banner (No Auth)
 exports.createBanner = (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -89,48 +34,128 @@ exports.createBanner = (req, res) => {
     }
 
     try {
-      console.log('Create banner request received');
-      console.log('Files:', req.files);
-      console.log('Body:', req.body);
+      console.log('🔍 Banner Creation Debug:');
+      console.log('req.body.restaurantId:', req.body.restaurantId);
+      console.log('req.userId:', req.userId);
+      console.log('req.user:', req.user);
+      console.log('req.user.restaurantId:', req.user?.restaurantId);
+      console.log('req.user._id:', req.user?._id);
       
-      // Use a default restaurantId if none provided
-      const restaurantId = req.body.restaurantId || 'default-restaurant';
+      // 🔥 ALWAYS use req.userId (which is user.restaurantId from user collection)
+      const restaurantId = req.userId;
+      console.log("🔍 Final restaurantId used for creation:", restaurantId);
+      console.log("✅ Using ONLY restaurantId from user collection for creation");
 
-      const bannerData = {
-        restaurantId,
-        banner_1: req.files?.banner_1 ? req.files.banner_1[0].path : null,
-        banner_2: req.files?.banner_2 ? req.files.banner_2[0].path : null,
-        banner_3: req.files?.banner_3 ? req.files.banner_3[0].path : null,
-      };
-
-      console.log('Banner data to save:', bannerData);
-
-      if (!bannerData.banner_1) {
-        return res.status(400).json({ success: false, message: "banner_1 is required" });
+      if (!restaurantId) {
+        return res.status(400).json({
+          success: false,
+          message: "restaurantId is required or could not be resolved",
+        });
       }
 
-      const banner = new Banner(bannerData);
+      // ✅ Upload banners to Cloudinary
+      const banner_1 = req.files?.banner_1
+        ? await uploadToCloudinary(req.files.banner_1[0].buffer, "banners")
+        : null;
+      const banner_2 = req.files?.banner_2
+        ? await uploadToCloudinary(req.files.banner_2[0].buffer, "banners")
+        : null;
+      const banner_3 = req.files?.banner_3
+        ? await uploadToCloudinary(req.files.banner_3[0].buffer, "banners")
+        : null;
+
+      if (!banner_1) {
+        return res.status(400).json({
+          success: false,
+          message: "banner_1 is required",
+        });
+      }
+
+      // ✅ Create and save banner
+      const banner = new Banner({
+        restaurantId,
+        banner_1,
+        banner_2,
+        banner_3,
+      });
+
       await banner.save();
 
-      console.log('Banner saved successfully:', banner._id);
-
-      // Convert file paths to URLs before sending response
-      const bannerWithUrls = {
-        ...banner.toObject(),
-        banner_1: getImageUrl(banner.banner_1),
-        banner_2: getImageUrl(banner.banner_2),
-        banner_3: getImageUrl(banner.banner_3),
-      };
-
-      res.status(201).json({ success: true, data: bannerWithUrls });
+      res.status(201).json({
+        success: true,
+        message: "Banner created successfully",
+        data: banner,
+      });
     } catch (error) {
       console.error("Create banner error:", error);
-      res.status(500).json({ success: false, message: error.message });
+      res.status(500).json({
+        success: false,
+        message: error.message || "Server error",
+      });
     }
   });
 };
 
-// ✅ Update Banner (No Auth)
+exports.getBanners = async (req, res) => {
+  try {
+    console.log('🔍 Banner API Debug:');
+    console.log('req.query.restaurantId:', req.query.restaurantId);
+    console.log('req.userId:', req.userId);
+    console.log('req.user:', req.user);
+    console.log('req.user.restaurantId:', req.user?.restaurantId);
+    console.log('req.user._id:', req.user?._id);
+    
+    // 🔥 ALWAYS use req.userId (which is user.restaurantId from user collection)
+    const restaurantId = req.userId;
+    console.log("🔍 Final restaurantId used:", restaurantId);
+    console.log("🔍 restaurantId type:", typeof restaurantId);
+    console.log("🔍 restaurantId toString:", restaurantId?.toString());
+    console.log("✅ Using ONLY restaurantId from user collection");
+
+    let banners;
+    if (restaurantId) {
+      banners = await Banner.find({ restaurantId });
+    } else {
+      banners = await Banner.find({});
+    }
+
+    // No need to modify URLs since Cloudinary already provides them
+    res.status(200).json({ success: true, data: banners });
+  } catch (error) {
+    console.error("Get banners error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Public API to get banners by restaurantId (for customer menu)
+exports.getPublicBanners = async (req, res) => {
+  try {
+    const { restaurantId } = req.query;
+    
+    console.log("🌐 Public Banner API - restaurantId:", restaurantId);
+    
+    if (!restaurantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: "restaurantId is required" 
+      });
+    }
+
+    const banners = await Banner.find({ restaurantId });
+
+    console.log("✅ Public banners found:", banners.length);
+    
+    res.status(200).json({ success: true, data: banners });
+  } catch (error) {
+    console.error("Error fetching public banners:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to fetch banners",
+      error: error.message 
+    });
+  }
+};
+
 exports.updateBanner = (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -140,75 +165,42 @@ exports.updateBanner = (req, res) => {
 
     try {
       const { id } = req.params;
-      console.log('Update banner request for ID:', id);
-      console.log('Files:', req.files);
-      console.log('Body:', req.body);
 
-      // Find existing banner
       const existingBanner = await Banner.findById(id);
       if (!existingBanner) {
         return res.status(404).json({ success: false, message: "Banner not found" });
       }
 
-      let updateData = {};
+      const updateData = {};
 
-      // Handle restaurantId
-      if (req.body.restaurantId) {
-        if (!mongoose.Types.ObjectId.isValid(req.body.restaurantId)) {
-          return res.status(400).json({ 
-            success: false, 
-            message: "Invalid restaurantId format. Must be a valid MongoDB ObjectId." 
-          });
-        }
-        updateData.restaurantId = req.body.restaurantId;
-      } else {
-        updateData.restaurantId = existingBanner.restaurantId;
-      }
+      // Upload new images to Cloudinary if they exist in the request
+      const banner_1_url = req.files?.banner_1
+        ? await uploadToCloudinary(req.files.banner_1[0].buffer, "banners")
+        : req.body.banner_1_url;
 
-      // Handle banner_1
-      if (req.files?.banner_1) {
-        updateData.banner_1 = req.files.banner_1[0].path;
-      } else if (req.body.banner_1_url && req.body.banner_1_url !== 'undefined') {
-        updateData.banner_1 = req.body.banner_1_url;
-      } else {
-        updateData.banner_1 = existingBanner.banner_1; // Keep existing
-      }
+      const banner_2_url = req.files?.banner_2
+        ? await uploadToCloudinary(req.files.banner_2[0].buffer, "banners")
+        : req.body.banner_2_url;
 
-      // Handle banner_2
-      if (req.files?.banner_2) {
-        updateData.banner_2 = req.files.banner_2[0].path;
-      } else if (req.body.banner_2_url && req.body.banner_2_url !== 'undefined') {
-        updateData.banner_2 = req.body.banner_2_url;
-      } else {
-        updateData.banner_2 = existingBanner.banner_2; // Keep existing
-      }
+      const banner_3_url = req.files?.banner_3
+        ? await uploadToCloudinary(req.files.banner_3[0].buffer, "banners")
+        : req.body.banner_3_url;
 
-      // Handle banner_3
-      if (req.files?.banner_3) {
-        updateData.banner_3 = req.files.banner_3[0].path;
-      } else if (req.body.banner_3_url && req.body.banner_3_url !== 'undefined') {
-        updateData.banner_3 = req.body.banner_3_url;
-      } else {
-        updateData.banner_3 = existingBanner.banner_3; // Keep existing
-      }
-
-      console.log('Update data:', updateData);
+      // Build the update object, falling back to the existing banner's image if no new one is provided
+      updateData.banner_1 = banner_1_url !== 'undefined' ? banner_1_url : existingBanner.banner_1;
+      updateData.banner_2 = banner_2_url !== 'undefined' ? banner_2_url : existingBanner.banner_2;
+      updateData.banner_3 = banner_3_url !== 'undefined' ? banner_3_url : existingBanner.banner_3;
 
       const updatedBanner = await Banner.findByIdAndUpdate(id, updateData, {
         new: true,
         runValidators: true,
       });
 
-      // Convert file paths to URLs
-      const bannerWithUrls = {
-        ...updatedBanner.toObject(),
-        banner_1: getImageUrl(updatedBanner.banner_1),
-        banner_2: getImageUrl(updatedBanner.banner_2),
-        banner_3: getImageUrl(updatedBanner.banner_3),
-      };
+      if (!updatedBanner) {
+        return res.status(404).json({ success: false, message: "Banner not found after update" });
+      }
 
-      console.log('Banner updated successfully');
-      res.status(200).json({ success: true, data: bannerWithUrls });
+      res.status(200).json({ success: true, data: updatedBanner });
     } catch (error) {
       console.error("Update banner error:", error);
       res.status(500).json({ success: false, message: error.message });
@@ -220,7 +212,7 @@ exports.updateBanner = (req, res) => {
 exports.deleteBanner = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('Delete banner request for ID:', id);
+
 
     // Find banner first
     const banner = await Banner.findById(id);
@@ -237,14 +229,14 @@ exports.deleteBanner = async (req, res) => {
       if (imagePath && fs.existsSync(imagePath)) {
         try {
           fs.unlinkSync(imagePath);
-          console.log('Deleted file:', imagePath);
+
         } catch (fileErr) {
           console.error('Error deleting file:', imagePath, fileErr);
         }
       }
     });
 
-    console.log('Banner deleted successfully');
+
     res.status(200).json({ success: true, message: "Banner deleted successfully" });
   } catch (error) {
     console.error("Delete banner error:", error);

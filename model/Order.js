@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 
 const orderItemSchema = new mongoose.Schema({
   itemId: {
@@ -76,7 +76,7 @@ const orderSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null
+      required: true
     },
     tableNumber: {
       type: String,
@@ -86,6 +86,11 @@ const orderSchema = new mongoose.Schema(
     customerName: {
       type: String,
       default: 'Walk-in Customer',
+      trim: true
+    },
+    customerAddress: {
+      type: String,
+      default: '',
       trim: true
     },
     orderType: {
@@ -138,13 +143,57 @@ orderSchema.index({ tableNumber: 1, status: 1 });
 orderSchema.index({ customerId: 1 });
 orderSchema.index({ status: 1 });
 
-orderSchema.pre("save", function (next) {
+orderSchema.pre("save", async function (next) {
   if (!this.orderId) {
     const timestamp = Date.now().toString().slice(-6); // last 6 digits of timestamp
     const random = Math.random().toString(36).substr(2, 4).toUpperCase();
     this.orderId = `ORD-${timestamp}${random}`; // e.g. ORD-458721ABCD
   }
+  
+  // Auto-populate customerAddress from customer collection if not already set
+  if (this.customerId && !this.customerAddress) {
+    try {
+      const Customer = mongoose.model('Customer');
+      const customer = await Customer.findById(this.customerId);
+      if (customer && customer.address) {
+        this.customerAddress = customer.address;
+      }
+    } catch (error) {
+      console.error('Error populating customer address:', error);
+    }
+  }
+  
   next();
+});
+
+// Post-save hook to update customer's totalSpent when order is completed
+orderSchema.post("save", async function (doc) {
+  // Only update if order is completed/served and has customerId
+  if (doc.customerId && (doc.status === 'completed' || doc.status === 'served')) {
+    try {
+      const Customer = mongoose.model('Customer');
+      const Order = mongoose.model('Order');
+      
+      // Calculate total spent from all completed/served orders for this customer
+      const orders = await Order.find({ 
+        customerId: doc.customerId,
+        status: { $in: ['completed', 'served'] }
+      });
+
+      const totalSpent = orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+      
+      // Update customer's totalSpent
+      await Customer.findByIdAndUpdate(
+        doc.customerId,
+        { totalSpent },
+        { new: true }
+      );
+
+      console.log(`Updated total spent for customer ${doc.customerId}: ₹${totalSpent}`);
+    } catch (error) {
+      console.error('Error updating customer total spent:', error);
+    }
+  }
 });
 
 

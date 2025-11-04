@@ -1,62 +1,101 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const Category = require('../model/Category');
 const User = require('../model/User');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { authMiddleware } = require('../middleware/authMiddleware');
-const { uploadBufferToCloudinary } = require('../utils/cloudinary');
+const cloudinary = require("../config/cloudinary");
+const streamifier = require("streamifier");
 
+// ---------- Multer Config with Memory Storage ----------
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-
-// ---------- Multer setup ----------
-// Use memory storage to avoid filesystem writes on serverless platforms
-const upload = multer({ storage: multer.memoryStorage() });
+// ---------- Cloudinary Upload Helper ----------
+const uploadToCloudinary = (fileBuffer, folder) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+    streamifier.createReadStream(fileBuffer).pipe(stream);
+  });
 
 // ---------- CREATE CATEGORY ----------
+// router.post(
+//   "/category",
+//   authMiddleware,
+//   upload.single("categoryImage"),
+//   async (req, res) => {
+//     try {
+//       const restaurantId = req.user.restaurantId;
+//       const { categoryName, basePrice, description, size } = req.body;
+
+//       console.log("Request Body:", req.body);
+//       console.log("Uploaded File:", req.file);
+
+//       if (!categoryName || !req.file) {
+//         return res
+//           .status(400)
+//           .json({ message: "categoryName and categoryImage are required" });
+//       }
+
+//       // Upload to Cloudinary inside "category" folder
+//       const result = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "category",
+//         public_id: `${Date.now()}-${path
+//           .basename(req.file.originalname, path.extname(req.file.originalname))}`,
+//       });
+
+//       // Delete local temp file
+//       fs.unlinkSync(req.file.path);
+
+//       const newCategory = new Category({
+//         categoryName,
+//         categoryImage: result.secure_url, // Cloudinary image URL
+//         restaurantId,
+//         basePrice,
+//         description,
+//         size,
+//       });
+
+//       await newCategory.save();
+
+//       console.log("New Category Saved:", newCategory);
+//       res.status(201).json(newCategory);
+//     } catch (err) {
+//       console.error("Error creating category:", err);
+//       res.status(500).json({ message: err.message || "Server error" });
+//     }
+//   }
+// );
+
 router.post(
-  '/category',
+  "/category",
   authMiddleware,
-  upload.single('categoryImage'),
+  upload.single("categoryImage"),
   async (req, res) => {
     try {
-      const restaurantId = req.user.restaurantId;
-      const { categoryName, basePrice, description, size } = req.body;
+      const { restaurantId, categoryName, basePrice, description, size } = req.body;
 
-      console.log("Request Body:", req.body);
-      console.log("Uploaded File:", req.file);
+      if (!restaurantId) {
+        return res.status(400).json({ message: "restaurantId is required" });
+      }
 
       if (!categoryName || !req.file) {
-        return res.status(400).json({ message: 'categoryName and categoryImage are required' });
+        return res.status(400).json({ message: "categoryName and categoryImage are required" });
       }
 
-      // Upload to Cloudinary, with base64 fallback if not configured or fails
-      let categoryImage;
-      const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
-      if (hasCloudinary) {
-        try {
-          const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-            folder: 'act-resto/categories',
-            resource_type: 'image',
-          });
-          categoryImage = uploaded.secure_url || uploaded.url;
-        } catch (err) {
-          console.error('Cloudinary upload failed, falling back to base64:', err);
-          const base64 = req.file.buffer.toString('base64');
-          const mime = req.file.mimetype || 'image/jpeg';
-          categoryImage = `data:${mime};base64,${base64}`;
-        }
-      } else {
-        const base64 = req.file.buffer.toString('base64');
-        const mime = req.file.mimetype || 'image/jpeg';
-        categoryImage = `data:${mime};base64,${base64}`;
-      }
+      // Upload image to Cloudinary
+      const imageUrl = await uploadToCloudinary(req.file.buffer, "category");
 
       const newCategory = new Category({
-        categoryName,
-        categoryImage,
         restaurantId,
+        categoryName,
+        categoryImage: imageUrl,
         basePrice,
         description,
         size,
@@ -64,55 +103,80 @@ router.post(
 
       await newCategory.save();
 
-      console.log("New Category Saved:", newCategory);
       res.status(201).json(newCategory);
     } catch (err) {
       console.error("Error creating category:", err);
-      res.status(500).json({ message: err.message || 'Server error' });
+      res.status(500).json({ message: err.message || "Server error" });
     }
   }
 );
 
-router.get('/categories', async (req, res) => {
+
+//fetching category
+router.get('/categories', authMiddleware, async (req, res) => {
   try {
-    const mongoose = require('mongoose');
-    // Get restaurantId from query parameter first, then fallback to env
-    const queryRestaurantId = req.query.restaurantId;
-    const envRestaurantId = process.env.RESTAURENT_ID;
-    const targetRestaurantId = queryRestaurantId || envRestaurantId;
-
-    // First, let's check all categories to debug
-    const allCategories = await Category.find({ isDeleted: false });
-    console.log('All categories in database:', allCategories.length);
-    console.log('Sample category:', allCategories[0]);
-
-    let filter = { isDeleted: false };
-    if (targetRestaurantId) {
-      // Try multiple approaches to match the restaurantId
-      const orConditions = [
-        { restaurantId: targetRestaurantId },
-        { restaurantId: new mongoose.Types.ObjectId(targetRestaurantId) }
-      ];
-      
-      // Also check if restaurantId field exists at all
-      if (allCategories.length > 0 && !allCategories[0].restaurantId) {
-        console.log('Categories exist but no restaurantId field found');
-        // If no restaurantId field exists, return all categories
-        filter = { isDeleted: false };
-      } else {
-        filter.$or = orConditions;
-      }
+    console.log('🔍 Categories API Debug:');
+    console.log('req.query.restaurantId:', req.query.restaurantId);
+    console.log('req.userId:', req.userId);
+    console.log('req.user:', req.user);
+    console.log('req.user.restaurantId:', req.user?.restaurantId);
+    console.log('req.user._id:', req.user?._id);
+    
+    // Prefer authenticated restaurantId, fallback to query for public access
+    const restaurantId = req.userId || req.query.restaurantId;
+    console.log('Final restaurantId used:', restaurantId);
+    console.log('restaurantId type:', typeof restaurantId);
+    console.log('restaurantId toString:', restaurantId?.toString());
+    console.log('✅ Using ONLY restaurantId from user collection');
+    
+    if (!restaurantId) {
+      console.log('❌ No restaurantId found');
+      return res.status(400).json({ message: 'restaurantId is required' });
     }
 
-    console.log('Categories filter:', filter);
-    const categories = await Category.find(filter);
-    console.log('Found categories:', categories.length);
+    console.log('🔍 Database Query:');
+    console.log('Filter:', { isDeleted: false, restaurantId });
+    
+    const categories = await Category.find({ isDeleted: false, restaurantId });
+    console.log('✅ Categories found:', categories.length);
+    console.log('Categories data:', categories);
+    
     res.json({ data: categories });
   } catch (err) {
-    console.error('Categories API error:', err);
+    console.error('❌ Categories API Error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// Public API to get categories by restaurantId (for customer menu)
+router.get('/public/categories', async (req, res) => {
+  try {
+    const { restaurantId } = req.query;
+    
+    console.log('🌐 Public Categories API - restaurantId:', restaurantId);
+    
+    if (!restaurantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'restaurantId is required' 
+      });
+    }
+
+    const categories = await Category.find({ 
+      restaurantId,
+      isDeleted: false 
+    });
+    
+    console.log('✅ Public categories found:', categories.length);
+    
+    res.status(200).json({ data: categories });
+  } catch (err) {
+    console.error('❌ Public Categories API Error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 // ---------- GET CATEGORY BY ID ----------
 router.get('/category/:id', async (req, res) => {
   try {
@@ -126,40 +190,108 @@ router.get('/category/:id', async (req, res) => {
 });
 
 // ---------- UPDATE CATEGORY ----------
-router.post('/category/update/:id', upload.single('categoryImage'), async (req, res) => {
-  try {
-    const { categoryName, restaurantId } = req.body;
-    const updateData = {};
-    if (categoryName) updateData.categoryName = categoryName;
-    if (restaurantId) updateData.restaurantId = restaurantId;
-    if (req.file && req.file.buffer) {
-      const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
-      if (hasCloudinary) {
-        try {
-          const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-            folder: 'act-resto/categories',
-            resource_type: 'image',
-          });
-          updateData.categoryImage = uploaded.secure_url || uploaded.url;
-        } catch (err) {
-          console.error('Cloudinary upload failed, falling back to base64:', err);
-          const base64 = req.file.buffer.toString('base64');
-          const mime = req.file.mimetype || 'image/jpeg';
-          updateData.categoryImage = `data:${mime};base64,${base64}`;
-        }
-      } else {
-        const base64 = req.file.buffer.toString('base64');
-        const mime = req.file.mimetype || 'image/jpeg';
-        updateData.categoryImage = `data:${mime};base64,${base64}`;
-      }
-    }
+// router.post(
+//   "/category/update/:id",
+//   upload.single("categoryImage"),
+//   async (req, res) => {
+//     try {
+//       const { categoryName, restaurantId } = req.body;
+//       const updateData = {};
 
-    const updatedCategory = await Category.findByIdAndUpdate(req.params.id, updateData, { new: true });
-    res.json(updatedCategory);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+//       if (categoryName) updateData.categoryName = categoryName;
+//       if (restaurantId) updateData.restaurantId = restaurantId;
+
+//       // If new image uploaded
+//       if (req.file) {
+//         const result = await cloudinary.uploader.upload(req.file.path, {
+//           folder: "category",
+//           public_id: `${Date.now()}-${path.basename(
+//             req.file.originalname,
+//             path.extname(req.file.originalname)
+//           )}`,
+//         });
+
+//         fs.unlinkSync(req.file.path); // remove temp file
+
+//         updateData.categoryImage = result.secure_url;
+//       }
+
+//       const updatedCategory = await Category.findByIdAndUpdate(
+//         req.params.id,
+//         updateData,
+//         { new: true }
+//       );
+
+//       if (!updatedCategory) {
+//         return res.status(404).json({ message: "Category not found" });
+//       }
+
+//       res.json(updatedCategory);
+//     } catch (err) {
+//       console.error("Error updating category:", err);
+//       res.status(500).json({ message: err.message || "Server error" });
+//     }
+//   }
+// );
+
+
+// // ---------- DELETE CATEGORY ----------
+// router.delete('/delete/category/:id', async (req, res) => {
+//   try {
+//     const category = await Category.findById(req.params.id);
+//     if (!category) {
+//       return res.status(404).json({ message: 'Category not found' });
+//     }
+
+//     // Remove image if you want on delete
+//     if (category.categoryImage && fs.existsSync(category.categoryImage)) {
+//       fs.unlinkSync(category.categoryImage);
+//     }
+
+//     category.isDeleted = true;
+//     await category.save();
+
+//     res.json({ message: 'Category marked as deleted successfully' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// })
+
+// -------------------UPDATE-CATEGORY---------------------------
+router.put(
+  "/category/update/:id",
+  upload.single("categoryImage"),
+  async (req, res) => {
+    try {
+      const body = req.body;
+      const updateData = {};
+
+      if (body.categoryName) updateData.categoryName = body.categoryName;
+      if (body.restaurantId) updateData.restaurantId = body.restaurantId;
+
+      // If a new image is uploaded, handle it from the buffer
+      if (req.file) {
+        updateData.categoryImage = await uploadToCloudinary(req.file.buffer, "category");
+      }
+
+      const updatedCategory = await Category.findByIdAndUpdate(
+        req.params.id,
+        updateData,
+        { new: true }
+      );
+
+      if (!updatedCategory) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+
+      res.json(updatedCategory);
+    } catch (err) {
+      console.error("Error updating category:", err);
+      res.status(500).json({ message: err.message || "Server error" });
+    }
   }
-});
+);
 
 // ---------- DELETE CATEGORY ----------
 router.delete('/delete/category/:id', async (req, res) => {
@@ -169,10 +301,8 @@ router.delete('/delete/category/:id', async (req, res) => {
       return res.status(404).json({ message: 'Category not found' });
     }
 
-    // Remove image if you want on delete
-    if (category.categoryImage && fs.existsSync(category.categoryImage)) {
-      fs.unlinkSync(category.categoryImage);
-    }
+    // The fs.unlinkSync call was removed as it was incorrect.
+    // If you want to delete the image from Cloudinary, you'd do it here.
 
     category.isDeleted = true;
     await category.save();
@@ -182,6 +312,7 @@ router.delete('/delete/category/:id', async (req, res) => {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
-})
+});
+
 
 module.exports = router;

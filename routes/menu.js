@@ -1,29 +1,29 @@
-// routes/menuRoutes.js
+﻿// routes/menuRoutes.js
 const express = require("express");
 const router = express.Router();
+const { authMiddleware } = require("../middleware/authMiddleware");
 const {
   createMenuItem,
   uploadMiddleware,
   getMenuItems,
   updateMenuItem,
-  deleteMenuItem,
+  // deleteMenuItem,
   hardDeleteMenuItem,
-  updateMenuStatus
-} = require("../controllers/MenuController");
+  updateMenuStatus,
+  deductStockFromMenu
+} = require("../controllers/NewMenuController");
 
-// GET all menu items for a restaurant
-router.get("/menu/allmenues", getMenuItems);
+router.get("/menu/allmenues", authMiddleware, getMenuItems);
+// Public API for customer menu (no auth required)
+const { getPublicMenuItems } = require("../controllers/NewMenuController");
+router.get("/menu/public/allmenues", getPublicMenuItems);
+router.post("/menu/add", authMiddleware, uploadMiddleware, createMenuItem);
+router.put('/menus/status', authMiddleware, updateMenuStatus);
+router.put("/menu/update/:id", authMiddleware, uploadMiddleware, updateMenuItem);
 
-// GET single menu item by ID
-// router.get("/menu/:menuId", getMenuItemById);
+router.delete("/menu/delete/:id", authMiddleware, hardDeleteMenuItem);
 
-// CREATE menu item
-router.post("/menu/add", uploadMiddleware, createMenuItem);
-router.put('/menus/status' ,updateMenuStatus)
-// UPDATE menu item by ID
-router.put("/menu/:id", uploadMiddleware, updateMenuItem);
-
-// DELETE menu item by ID (hard delete - permanently removes from database)
-router.delete("/menu/delete/:id", hardDeleteMenuItem);
+// ==================== DEDUCT STOCK FROM MENU ====================
+router.post("/menu/deduct-stock", authMiddleware, deductStockFromMenu);
 
 module.exports = router;

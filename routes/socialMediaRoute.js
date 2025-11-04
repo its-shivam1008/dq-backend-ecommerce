@@ -1,7 +1,7 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 const socialController = require("../controllers/SocialMediaController");
-const {authMiddleware} = require("../middleware/authMiddleware");
+const {authMiddleware} = require("../middlewares/authMiddleware");
 
 // Public routes
 router.get("/", socialController.index);

@@ -1,7 +1,7 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 const bannerController = require("../controllers/RestaurantBannerController");
-const {authMiddleware} = require("../middleware/authMiddleware");
+const {authMiddleware} = require("../middlewares/authMiddleware");
 
 // Create or update banners
 router.post("/", authMiddleware, bannerController.createOrUpdateBanners);
