@@ -41,7 +41,7 @@ exports.createReservation = async (req, res) => {
     const end = new Date(endTime);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return res.status(400).json({ message: "Invalid startTime or endTime" });
-    }\r
+    }
     if (start >= end) {
       return res.status(400).json({ message: "endTime must be after startTime" });
     }
