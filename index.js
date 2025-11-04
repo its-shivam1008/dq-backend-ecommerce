@@ -67,11 +67,11 @@ const corsOptions = {
 // In non-production, allow all origins to prevent crashes during local/dev usage
 if (process.env.NODE_ENV === 'production') {
   app.use(cors(corsOptions));
-  // Explicitly handle preflight in production
-  app.options('/(.*)', cors(corsOptions));
+  // Explicitly handle preflight in production (use named wildcard for path-to-regexp@8)
+  app.options('/*catchall', cors(corsOptions));
 } else {
   app.use(cors({ origin: true, credentials: true }));
-  app.options('/(.*)', cors({ origin: true, credentials: true }));
+  app.options('/*catchall', cors({ origin: true, credentials: true }));
 }
 
 app.use(express.json());
@@ -140,10 +140,11 @@ startCronJobs();
 // Initialize auto email service
 initializeAutoEmailService();
 
-// 1. COMMENT this (for prod)
-app.listen(PORT, () => {
-  console.log(`🚀 Server started at http://localhost:${PORT}`);
-});
-
-// UNcomment this (for prod)
-// module.exports = app;
+// Start server locally; export app for serverless/Vercel
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server started at http://localhost:${PORT}`);
+  });
+}

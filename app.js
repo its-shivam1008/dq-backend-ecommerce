@@ -55,8 +55,8 @@ function createApp() {
 
   // Middleware
   app.use(cors(corsOptions));
-  // Explicitly handle preflight for all routes
-  app.options('*', cors(corsOptions));
+  // Explicitly handle preflight for all routes (use named wildcard for path-to-regexp@8)
+  app.options('/*catchall', cors(corsOptions));
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
