@@ -128,29 +128,20 @@ router.delete("/custom-layout/:restaurantId", async (req, res) => {
   }
 });
 
-// Verify restaurant admin access
+// Verify restaurant admin access (require an existing restaurant profile)
 router.get("/admin/verify/:restaurantId", async (req, res) => {
   try {
     const { restaurantId } = req.params;
     console.log('🔐 Verifying admin access for restaurant:', restaurantId);
-    
-    // Check if restaurant profile exists
-    let restaurant = await RestaurantProfile.findOne({ restaurantID: restaurantId });
-    
-    // If no profile exists, create one automatically
+
+    const restaurant = await RestaurantProfile.findOne({ restaurantID: restaurantId });
     if (!restaurant) {
-      console.log('🆕 Creating restaurant profile for admin access...');
-      restaurant = await RestaurantProfile.create({
-        restaurantID: restaurantId,
-        restaurantName: 'Restaurant ' + restaurantId.slice(0, 8),
-        firstName: 'Admin',
-        lastName: 'User',
-        email: `admin-${restaurantId.slice(0, 8)}@restaurant.com`,
-        permission: 'admin'
+      return res.status(404).json({ 
+        success: false,
+        message: "Restaurant not found. Please enter a valid restaurant ID."
       });
-      console.log('✅ Restaurant profile auto-created');
     }
-    
+
     console.log('✅ Admin verification successful');
     res.json({ 
       success: true,
